@@ -1,0 +1,4 @@
+CREATE TABLE inputs (
+    day INT NOT NULL PRIMARY KEY,
+    data TEXT NOT NULL
+);
