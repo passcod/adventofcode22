@@ -96,7 +96,7 @@ with recursive stacks(n, thismove, height, stack, crate) as (
         crate
     from withmove
     where thismove is not null
-    and n < 2
+    -- and n < 2
     ) u
 )
 select height, stack, crate from stacks where n = (select max(n) from stacks) order by height, stack \crosstabview
@@ -105,3 +105,63 @@ select height, stack, crate from stacks where n = (select max(n) from stacks) or
 
 
 -- Part Two
+create materialized view d5p2_enumerated_moves as (
+    select
+        row_number() over (rows 0 preceding) as id,
+        (moves).from_stack, (moves).to_stack
+    from (
+        select unnest(('{' || rtrim(
+            repeat('"(' || from_stack || ',0)",', crates) ||
+            repeat('"(0,' || to_stack || ')",', crates)
+            -- move first into a 0 stack, then to the right place, and that
+            -- simulates moving the whole part of the stack into the right place
+        , ',') || '}')::onemove[]) as moves
+        from day05_moves
+    ) t
+);
+create index on d5p2_enumerated_moves (id);
+
+-- identical to part 1, all that changes is the enumerated moves
+with recursive stacks(n, thismove, height, stack, crate) as (
+    select 1, null::onemove, height, stack, crate from day05_crates
+    union all
+    select * from (
+    with
+    withmove as (
+        select n, stacks.height, stacks.stack, stacks.crate, (
+            select (moves.from_stack, moves.to_stack)::onemove
+            from d5p2_enumerated_moves moves
+            where moves.id = stacks.n
+        ) thismove
+        from stacks
+        where crate is not null
+    ),
+    max_heights as (
+        select max(height) as max_height, stack from withmove group by stack
+    )
+    select n + 1, thismove,
+        case
+        when
+            stack = (thismove).from_stack and
+            height = (select max_height from max_heights mh where mh.stack = withmove.stack)
+        then coalesce((select max_height from max_heights mh where mh.stack = (thismove).to_stack), 0) + 1
+        else height
+        end as height,
+
+        case
+        when
+            stack = (thismove).from_stack and
+            height = (select max_height from max_heights mh where mh.stack = withmove.stack)
+        then (thismove).to_stack
+        else stack
+        end as stack,
+
+        crate
+    from withmove
+    where thismove is not null
+    -- and n < 2
+    ) u
+)
+select height, stack, crate from stacks where n = (select max(n) from stacks) order by height, stack \crosstabview
+-- select * from stacks;
+-- select * from stacks where n = (select max(n) from stacks);
