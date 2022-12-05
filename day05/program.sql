@@ -1,10 +1,15 @@
 \set content '''' `cat input.txt` ''''
 insert into inputs (day, data) values (5, :content) on conflict (day) do update set data = excluded.data;
 
+drop materialized view if exists d5p2_enumerated_moves;
+drop materialized view if exists d5p1_enumerated_moves;
+drop type if exists onemove;
+create type onemove as (from_stack int, to_stack int);
+
 drop table if exists day05_moves;
 create table day05_moves (
     id serial primary key,
-    crate int not null,
+    crates int not null,
     from_stack int not null,
     to_stack int not null
 );
@@ -19,7 +24,7 @@ create table day05_crates (
 with
 moves as (select regexp_split_to_table(substring(data from (position('move' in data) - 4)), '\n') m from inputs where day = 5),
 parsed as (select regexp_match(m, 'move (\d+) from (\d+) to (\d+)') p from moves)
-insert into day05_moves (crate, from_stack, to_stack)
+insert into day05_moves (crates, from_stack, to_stack)
 select p[1]::int, p[2]::int, p[3]::int from parsed where p[1] != '';
 
 with
@@ -43,4 +48,60 @@ select * from parsed;
 select * from day05_crates \crosstabview
 
 -- Part One
+create materialized view d5p1_enumerated_moves as (
+    select
+        row_number() over (rows 0 preceding) as id,
+        (moves).from_stack, (moves).to_stack
+    from (
+        select unnest(('{' || rtrim(repeat('"(' || from_stack || ',' || to_stack || ')",', crates), ',') || '}')::onemove[]) as moves
+        from day05_moves
+    ) t
+);
+create index on d5p1_enumerated_moves (id);
+
+with recursive stacks(n, thismove, height, stack, crate) as (
+    select 1, null::onemove, height, stack, crate from day05_crates
+    union all
+    select * from (
+    with
+    withmove as (
+        select n, stacks.height, stacks.stack, stacks.crate, (
+            select (moves.from_stack, moves.to_stack)::onemove
+            from d5p1_enumerated_moves moves
+            where moves.id = stacks.n
+        ) thismove
+        from stacks
+        where crate is not null
+    ),
+    max_heights as (
+        select max(height) as max_height, stack from withmove group by stack
+    )
+    select n + 1, thismove,
+        case
+        when
+            stack = (thismove).from_stack and
+            height = (select max_height from max_heights mh where mh.stack = withmove.stack)
+        then coalesce((select max_height from max_heights mh where mh.stack = (thismove).to_stack), 0) + 1
+        else height
+        end as height,
+
+        case
+        when
+            stack = (thismove).from_stack and
+            height = (select max_height from max_heights mh where mh.stack = withmove.stack)
+        then (thismove).to_stack
+        else stack
+        end as stack,
+
+        crate
+    from withmove
+    where thismove is not null
+    and n < 2
+    ) u
+)
+select height, stack, crate from stacks where n = (select max(n) from stacks) order by height, stack \crosstabview
+-- select * from stacks;
+-- select * from stacks where n = (select max(n) from stacks);
+
+
 -- Part Two
